@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+
+# scratch / test outputs
+data_test/
+
+# local-only notes
+CLAUDE.md
+
+# 108 GB of raw Navcam data — selected subset is force-added below.
+# Everything else in data/ is gitignored.
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/

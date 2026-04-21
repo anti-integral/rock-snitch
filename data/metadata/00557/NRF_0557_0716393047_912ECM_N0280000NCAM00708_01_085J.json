@@ -1,0 +1,39 @@
+{
+  "extended": {
+    "mastAz": "337.419",
+    "mastEl": "-44.915",
+    "sclk": "716393049.376",
+    "scaleFactor": "1",
+    "xyz": "(0.0,0.0,0.0)",
+    "subframeRect": "(1905,1585,1296,976)",
+    "dimension": "(1296,976)"
+  },
+  "sol": 557,
+  "attitude": "(0.13754,-0.00912295,0.0172652,-0.990304)",
+  "image_files": {
+    "medium": "https://mars.nasa.gov/mars2020-raw-images/pub/ods/surface/sol/00557/ids/edr/browse/ncam/NRF_0557_0716393047_912ECM_N0280000NCAM00708_01_085J01_800.jpg",
+    "small": "https://mars.nasa.gov/mars2020-raw-images/pub/ods/surface/sol/00557/ids/edr/browse/ncam/NRF_0557_0716393047_912ECM_N0280000NCAM00708_01_085J01_320.jpg",
+    "full_res": "https://mars.nasa.gov/mars2020-raw-images/pub/ods/surface/sol/00557/ids/edr/browse/ncam/NRF_0557_0716393047_912ECM_N0280000NCAM00708_01_085J01.png",
+    "large": "https://mars.nasa.gov/mars2020-raw-images/pub/ods/surface/sol/00557/ids/edr/browse/ncam/NRF_0557_0716393047_912ECM_N0280000NCAM00708_01_085J01_1200.jpg"
+  },
+  "imageid": "NRF_0557_0716393047_912ECM_N0280000NCAM00708_01_085J",
+  "camera": {
+    "filter_name": "UNK",
+    "camera_vector": "(0.6181848895136853,-0.2604137227498118,0.7416415140622433)",
+    "camera_model_component_list": "(1.00584,0.70423,-1.86877);(0.649789,-0.263564,0.712969);(1553.61,2554.47,474.91);(-1709.19,702.545,2328.76);(0.650152,-0.264119,0.712432);(4.24e-07,0.0517186,-0.0187155);(1.2e-08,3e-08,-3e-09);2.0;0.0",
+    "camera_position": "(1.00584,0.70423,-1.86877)",
+    "instrument": "NAVCAM_RIGHT",
+    "camera_model_type": "CAHVORE"
+  },
+  "caption": "NASA's Mars Perseverance rover acquired this image using its onboard Right Navigation Camera (Navcam). The camera is located high on the rover's mast and aids in driving. \n\nThis image was acquired on Sept. 14, 2022 (Sol 557) at the local mean solar time of 13:54:44.",
+  "sample_type": "Full",
+  "date_taken_mars": "Sol-00557M13:54:44.315",
+  "credit": "NASA/JPL-Caltech",
+  "date_taken_utc": "2022-09-14T02:12:09.377",
+  "json_link": "https://mars.nasa.gov/rss/api/?feed=raw_images&category=mars2020&feedtype=json&id=NRF_0557_0716393047_912ECM_N0280000NCAM00708_01_085J",
+  "link": "https://mars.nasa.gov/mars2020/multimedia/raw-images/NRF_0557_0716393047_912ECM_N0280000NCAM00708_01_085J",
+  "drive": "0",
+  "title": "Mars Perseverance Sol 557: Right Navigation Camera (Navcam)",
+  "site": 28,
+  "date_received": "2022-09-14T03:50:10Z"
+}

@@ -1,0 +1,39 @@
+{
+  "extended": {
+    "mastAz": "-23.0268",
+    "mastEl": "-45.3226",
+    "sclk": "825406009.357",
+    "scaleFactor": "2",
+    "xyz": "(19.7801,-19.5853,-3.86182)",
+    "subframeRect": "(2545,1,2576,1936)",
+    "dimension": "(1288,968)"
+  },
+  "sol": 1785,
+  "attitude": "(0.645474,-0.020853,0.0934275,-0.75776)",
+  "image_files": {
+    "medium": "https://mars.nasa.gov/mars2020-raw-images/pub/ods/surface/sol/01785/ids/edr/browse/ncam/NLF_1785_0825406007_909ECM_N0860510NCAM00347_04_195J02_800.jpg",
+    "small": "https://mars.nasa.gov/mars2020-raw-images/pub/ods/surface/sol/01785/ids/edr/browse/ncam/NLF_1785_0825406007_909ECM_N0860510NCAM00347_04_195J02_320.jpg",
+    "full_res": "https://mars.nasa.gov/mars2020-raw-images/pub/ods/surface/sol/01785/ids/edr/browse/ncam/NLF_1785_0825406007_909ECM_N0860510NCAM00347_04_195J02.png",
+    "large": "https://mars.nasa.gov/mars2020-raw-images/pub/ods/surface/sol/01785/ids/edr/browse/ncam/NLF_1785_0825406007_909ECM_N0860510NCAM00347_04_195J02_1200.jpg"
+  },
+  "imageid": "NLF_1785_0825406007_909ECM_N0860510NCAM00347_04_195J",
+  "camera": {
+    "filter_name": "UNK",
+    "camera_vector": "(0.9029807012953278,0.031151685862010375,0.42855037691752473)",
+    "camera_model_component_list": "(0.845517,0.311325,-1.86749);(0.64649,-0.261897,0.716573);(576.319,1362.52,13.0841);(-351.858,149.862,1727.4);(0.646958,-0.260558,0.716639);(1.736e-06,0.0501396,-0.0171254);(-8e-09,1e-08,-2.9e-08);2.0;0.0",
+    "camera_position": "(0.845517,0.311325,-1.86749)",
+    "instrument": "NAVCAM_LEFT",
+    "camera_model_type": "CAHVORE"
+  },
+  "caption": "NASA's Mars Perseverance rover acquired this image using its onboard Left Navigation Camera (Navcam). The camera is located high on the rover's mast and aids in driving. \n\nThis image was acquired on Feb. 26, 2026 (Sol 1785) at the local mean solar time of 13:19:29.",
+  "sample_type": "Full",
+  "date_taken_mars": "Sol-01785M13:19:29.714",
+  "credit": "NASA/JPL-Caltech",
+  "date_taken_utc": "2026-02-26T19:49:16.255",
+  "json_link": "https://mars.nasa.gov/rss/api/?feed=raw_images&category=mars2020&feedtype=json&id=NLF_1785_0825406007_909ECM_N0860510NCAM00347_04_195J",
+  "link": "https://mars.nasa.gov/mars2020/multimedia/raw-images/NLF_1785_0825406007_909ECM_N0860510NCAM00347_04_195J",
+  "drive": "510",
+  "title": "Mars Perseverance Sol 1785: Left Navigation Camera (Navcam)",
+  "site": 86,
+  "date_received": "2026-02-27T00:57:11Z"
+}
