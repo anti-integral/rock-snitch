@@ -1,0 +1,70 @@
+# Default pipeline configuration.
+data:
+  root: data                  # Where download_navcam.py wrote images/ and metadata/
+  index_path: data/.state/stereo_index.parquet
+
+detector:
+  min_height_m: 0.10          # rock threshold
+  stereo_trust_range_m: 20.0  # beyond this, prefer monocular branch
+  near_field_range_m: 30.0    # max range considered for near-field branch
+  ground_plane:
+    max_iters: 2000
+    distance_thresh_m: 0.05
+    local_patch_m: 3.0
+  rock_cluster:
+    min_pixels: 15
+    min_height_m: 0.08        # internal, pre-threshold to account for noise
+
+segmenter:
+  backend: sam2               # one of: sam2, grounded_sam
+  sam2:
+    checkpoint: sam2_hiera_large.pt
+    config: sam2_hiera_l.yaml
+    points_per_side: 32
+    pred_iou_thresh: 0.65
+    stability_score_thresh: 0.88
+    min_mask_region_area: 20
+  grounded:
+    text_prompt: "rock. boulder. stone."
+    box_threshold: 0.3
+    text_threshold: 0.25
+
+depth:
+  backend: unidepth_v2        # one of: unidepth_v2, metric3d_v2
+  unidepth:
+    checkpoint: unidepth_v2_vitl14.pt
+
+stereo:
+  backend: sgbm               # one of: sgbm, raft_stereo
+  sgbm:
+    min_disparity: 0
+    num_disparities: 192
+    block_size: 5
+    p1_mult: 8
+    p2_mult: 32
+    disp12_max_diff: 1
+    uniqueness_ratio: 10
+    speckle_window_size: 100
+    speckle_range: 2
+    mode: sgbm_3way
+
+features:
+  dinov2:
+    name: facebook/dinov2-large
+    patch_size: 14
+
+training:
+  pseudolabel:
+    min_stereo_confidence: 0.7
+    max_range_m: 15.0
+    min_height_m: 0.08
+    max_ground_rmse_m: 0.05
+  head:
+    hidden_dims: [256, 256]
+    dropout: 0.1
+  optim:
+    lr: 1e-3
+    weight_decay: 1e-4
+    batch_size: 128
+    max_epochs: 40
+    grad_clip: 1.0

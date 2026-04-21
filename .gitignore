@@ -17,4 +17,33 @@ data/
 # Python
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
 .venv/
+.eggs/
+build/
+dist/
+
+# Test / coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Model weights and runtime artefacts
+models/
+runs/
+outputs/
+tmp/
+wandb/
+lightning_logs/
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.safetensors
+
+# Derived indices
+data/.state/stereo_index.parquet
+
