@@ -272,7 +272,29 @@ multi-view geometry, so there's not much to *invent* — the work is plumbing
 each step correctly.
 
 **Step 6.1 — Pair the frames.** Already discussed in §2. We mine real stereo
-pairs by matching SCLK + mast pointing + subframe.
+pairs by matching SCLK + mast pointing + subframe. Here's a verified pair
+from sol 755 (cherry-picked from `data/relevant/` for the dense rock garden
+in the foreground):
+
+<table>
+<tr>
+<td align="center"><b>Left eye</b><br><sub><code>NLF_0755_0733967989_005ECM_…_195J</code></sub></td>
+<td align="center"><b>Right eye</b><br><sub><code>NRF_0755_0733967989_005ECM_…_195J</code></sub></td>
+</tr>
+<tr>
+<td><img src="../data/relevant/NLF_0755_0733967989_005ECM_N0372562NCAM03755_01_195J.png" alt="sol 755 NLF"></td>
+<td><img src="../data/relevant/NRF_0755_0733967989_005ECM_N0372562NCAM03755_01_195J.png" alt="sol 755 NRF"></td>
+</tr>
+</table>
+
+> Sol 755, mastAz = -0.1°, mastEl = -34.6° (forward, looking down at terrain).
+> SCLK delta = 0.0 s, identical 1280×960 subframe, mast pointing matched
+> within 0.5°. Compare the foreground boulders — each has shifted a few
+> pixels horizontally between the two views. That horizontal pixel offset
+> *is* the stereo disparity, and §6.4 turns it into metric depth via
+> `Z = f · b / d`. The far hillside, by contrast, shows almost no shift
+> because parallax goes to zero at infinity. The whole pipeline rests on
+> measuring this shift to sub-pixel precision.
 
 **Step 6.2 — Linearize each camera.** CAHVORE has radial distortion. To use any
 standard stereo library we first apply the inverse distortion to produce a
