@@ -76,10 +76,12 @@ def _get_backends(*, mock_models: bool, use_gpu: bool = False) -> dict[str, Any]
     key = (bool(mock_models), bool(use_gpu))
     if key not in _lazy_backends:
         from rocksnitch.cli import _build_backends
+        from rocksnitch.profiles import get_profile
 
         log.info("Building backends (mock_models=%s, use_gpu=%s)", mock_models, use_gpu)
+        profile = get_profile("minimal" if mock_models else "full")
         stereo, segmenter, depth, features = _build_backends(
-            config={}, use_gpu=use_gpu, mock_models=mock_models
+            config={}, profile=profile, use_gpu=use_gpu
         )
         _lazy_backends[key] = {
             "stereo": stereo,

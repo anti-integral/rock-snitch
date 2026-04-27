@@ -24,6 +24,51 @@ rock-snitch train --labels outputs/pseudolabels --out runs/mono_head_v1
 rock-snitch eval --ckpt runs/mono_head_v1/last.ckpt --sols 900-1000
 ```
 
+## Profiles - pick what you actually need
+
+The full pipeline runs five frozen models (SAM2, DINOv2, UniDepthV2, optionally
+RAFT-Stereo, optionally GroundingDINO) plus a learned mono-height head. **Most
+users don't need all of them.** Use `--profile` to bundle the right subset:
+
+| Profile | Stereo | Mono | Segmenter | Depth | Features | When |
+|---|---|---|---|---|---|---|
+| `full` (default) | on | on | SAM2 | UniDepthV2 | DINOv2 | 5090 box, full quality |
+| `stereo-only` | on | off | SAM2 | - | - | Close-range only (<= 20 m), no mono GPU |
+| `mono-only` | off | on | SAM2 | UniDepthV2 | DINOv2 | Single image, no stereo partner |
+| `minimal` | mock | mock | mock | mock | mock | Smoke test, no GPU, no weights |
+| `mock` | (alias of minimal) | | | | | |
+
+```bash
+rock-snitch profiles                                    # show table
+rock-snitch detect --sol 755                            # full pipeline (default)
+rock-snitch detect --sol 755 --profile stereo-only      # geometry only
+rock-snitch detect --sol 755 --profile minimal --no-gpu # CPU smoke test
+```
+
+Each toggle is independently overridable:
+
+```bash
+# full pipeline but skip CAHVORE linearization (faster, ~2 px corner error)
+rock-snitch detect --sol 755 --no-linearize
+
+# stereo-only profile but force the SGBM backend explicitly
+rock-snitch detect --sol 755 --profile stereo-only --stereo-backend sgbm
+
+# mono-only profile but with mock depth (no UniDepthV2 weights needed)
+rock-snitch detect --sol 755 --profile mono-only --depth mock
+```
+
+Or use the canned shell wrappers:
+
+```bash
+bash scripts/detect_full.sh         755
+bash scripts/detect_stereo_only.sh  755
+bash scripts/detect_mono_only.sh    755
+bash scripts/detect_minimal.sh      755     # no GPU needed
+```
+
+All flags: `rock-snitch detect --help`.
+
 ## Background
 
 Mars 2020 Navcam: stereo 96 deg x 73 deg FOV, 42.4 cm baseline, 0.33 mrad/px native (~5120 x 3840).
