@@ -29,6 +29,18 @@
 
 ## 1. The problem
 
+```mermaid
+flowchart LR
+    A[image + metadata JSON]:::input --> B{stereo pair<br/>available?}
+    B -- yes --> N[near-field branch<br/>CAHVORE -> rectify<br/>SGBM disparity<br/>point cloud<br/>ground plane<br/>per-mask height]
+    B -- no --> F[far-field branch only]
+    N --> F[far-field branch<br/>SAM2 + DINOv2<br/>UniDepthV2 metric depth<br/>learned height head]
+    F --> G[range-gated fusion<br/>stereo <= 20 m<br/>mono > 20 m]
+    G --> O[detections JSON<br/>+ overlay PNG<br/>+ disparity PNG]:::output
+    classDef input fill:#dbeafe,stroke:#1e3a8a,color:#000
+    classDef output fill:#dcfce7,stroke:#14532d,color:#000
+```
+
 NASA's Perseverance rover drives across Jezero crater. Before each drive segment
 the on-board autonomous-navigation system (ENav) builds a local terrain map
 from stereo Navcam imagery and plans a safe path. ENav is conservative — it
@@ -145,9 +157,15 @@ and convert to pixels.
 Navcam pixel IFOV: native = 0.33 mrad/px (Maki et al. 2020). With 4× binning
 common in our dataset, effective IFOV ≈ **1.32 mrad/px**.
 
-Angular size of an object of height *h* at range *R*: θ = h/R radians.
+Angular size of an object of height $h$ at range $R$ is
 
-For h = 0.10 m:
+$$\theta = \frac{h}{R} \quad\text{(radians)}.$$
+
+Converted to pixels via the per-pixel IFOV:
+
+$$\text{pixels} = \frac{\theta}{\mathrm{IFOV}} = \frac{h}{R \cdot \mathrm{IFOV}}.$$
+
+For $h = 0.10\,\mathrm{m}$:
 
 | Range | θ (mrad) | Pixels (binned) | Pixels (native) |
 |------:|---------:|----------------:|----------------:|
@@ -156,6 +174,12 @@ For h = 0.10 m:
 |  30 m |     3.3  |          2.5 px |         10.1 px |
 |  50 m |     2.0  |          1.5 px |          6.1 px |
 | 100 m |     1.0  |          0.76 px|          3.0 px |
+
+<p align="center">
+  <img src="media/angular-size-overlay.jpg" alt="Yellow scale bars showing 10 cm rock pixel-height at 10/30/50/100 m projected onto sol 755">
+  <br>
+  <sub><i>Yellow bars on a real sol-755 frame: actual pixel height a 10 cm rock would occupy at each range. At 100 m it's < 1 px tall — sub-Nyquist.</i></sub>
+</p>
 
 This table is the most important table in the entire design. It tells us:
 
@@ -174,27 +198,28 @@ If the user ever wants confident 100 m detection, we'd need to fetch the
 reassembled full-resolution Navcam mosaics from the PDS archive (via
 `mars-raw-utils`). That's a future-work item, not v1.
 
+> [!IMPORTANT]
+> A 10 cm rock at 50 m occupies 1.5 binned pixels. That sets the **hard cap**
+> on v1's detection horizon, independent of what model we choose downstream.
+
 ---
 
 ## 4. The second big realization: stereo depth error grows with Z²
 
 OK, so given a stereo pair, what depth accuracy can we *actually* achieve?
 
-The stereo triangulation formula:
+The stereo triangulation formula is
 
-```
-Z = f · b / d
-```
+$$Z = \frac{f \cdot b}{d},$$
 
-where Z is depth (m), f is focal length (px), b is baseline (m), d is disparity
-(px). Differentiating:
+where $Z$ is depth (m), $f$ is focal length (px), $b$ is baseline (m), $d$ is
+disparity (px). Differentiating with respect to $d$ gives the propagation of
+sub-pixel matching error:
 
-```
-ΔZ = Z² · Δd / (f · b)
-```
+$$\boxed{\ \Delta Z = \frac{Z^{2}\,\Delta d}{b \cdot f}\ }.$$
 
-Plugging in our numbers (binned): f ≈ 576 px, b = 0.424 m, sub-pixel matching
-precision Δd ≈ 0.5 px:
+Plugging in our numbers (binned): $f \approx 576$ px, $b = 0.424$ m, sub-pixel
+matching precision $\Delta d \approx 0.5$ px:
 
 | Z (m) | ΔZ (m) |
 |------:|-------:|
@@ -206,7 +231,13 @@ precision Δd ≈ 0.5 px:
 |  50   |  5.13  |
 |  80   | 13.13  |
 
-Now compare ΔZ to the rock height we're trying to measure (0.10 m):
+<p align="center">
+  <img src="media/stereo-depth-error.png" alt="Log-log plot of depth uncertainty ΔZ vs range Z, with rock-height threshold and stereo-trust-horizon marked">
+  <br>
+  <sub><i>$\Delta Z \propto Z^{2}$ on log–log axes. The 10 cm green dashed line is the height we're trying to measure; the 20 m blue dashed line is where we stop trusting stereo for that purpose. The orange shaded zone is monocular territory.</i></sub>
+</p>
+
+Now compare $\Delta Z$ to the rock height we're trying to measure (0.10 m):
 
 - At 10 m, depth uncertainty (0.20 m) is **2× the rock height**. Already
   marginal.
@@ -217,14 +248,18 @@ Now compare ΔZ to the rock height we're trying to measure (0.10 m):
 But wait — depth uncertainty isn't quite the same as *height* uncertainty. To
 measure the height of a rock, we look at the difference between two depths
 (rock peak vs ground at the same line of sight) or between two y-pixel
-projections at the same depth. Either way, the error scales similarly with Z.
+projections at the same depth. Either way, the error scales similarly with $Z$.
 
 The honest takeaway: **stereo can reliably measure 10 cm-grade heights only out
 to about 10–15 m.** Beyond that, the error bars on the height itself eat the
 signal.
 
 This is independent of the stereo algorithm. RAFT-Stereo is better than SGBM,
-but neither one violates the Z² law.
+but neither one violates the $Z^{2}$ law.
+
+> [!IMPORTANT]
+> Stereo's **trust horizon for height** is ~15 m on our binned imagery.
+> We use 20 m as the fusion gate to stay conservative.
 
 ---
 
@@ -234,10 +269,14 @@ Putting §3 and §4 together:
 
 | Range | Can we *see* 10 cm rocks? | Can stereo *measure* their height? |
 |------:|:-------------------------|:------------------------------------|
-| ≤ 10 m | yes (≥ 7.6 px) | yes (ΔZ ≤ 0.2 m) |
+| ≤ 10 m | yes (≥ 7.6 px) | yes ($\Delta Z \leq 0.2$ m) |
 | 10–20 m | yes (3.8 px @ 20m) | marginal |
 | 20–50 m | yes (1.5 px @ 50m, ok) | **no** |
 | > 50 m | no (sub-pixel) | no |
+
+<p align="center">
+  <img src="media/two-regime-diagram.png" alt="Range axis showing stereo regime up to 20 m and monocular regime beyond, with fusion gate annotation">
+</p>
 
 So there's a band — from about 20 m out to 50 m — where we **can see** the
 rock but **can't trust stereo for its height**. We need a different mechanism
@@ -308,12 +347,15 @@ coplanar. Stereo algorithms assume both — assume that for any 3D point, its
 projection into the left and right images sits on the **same row** (epipolar
 geometry collapsed to image rows).
 
-To get there: compute a new common coordinate frame whose x-axis is the
-baseline direction and whose z-axis is the average forward axis. Compute
+To get there: compute a new common coordinate frame whose $x$-axis is the
+baseline direction and whose $z$-axis is the average forward axis. Compute
 per-eye rotations from each camera's frame into this new frame. Apply those
-rotations as homographies (`H = K_dst · R · K_src⁻¹`) via
-`cv2.warpPerspective`. Result: two warped images sharing a single intrinsic
-matrix `K`, with epipolar lines on rows.
+rotations as homographies
+
+$$H = K_{\mathrm{dst}}\, R\, K_{\mathrm{src}}^{-1}$$
+
+via `cv2.warpPerspective`. Result: two warped images sharing a single
+intrinsic matrix $K$, with epipolar lines on rows.
 
 **Step 6.4 — Compute disparity.** Now run a stereo matcher. We support two:
 
@@ -324,12 +366,25 @@ matrix `K`, with epipolar lines on rows.
   Better in low-texture regions (sand, distant terrain).
 
 Both produce a `DisparityMap` with per-pixel disparity, confidence, and a
-validity mask.
+validity mask. Here's the actual SGBM output on the sol-755 pair from §6.1:
 
-**Step 6.5 — Back-project to a 3D point cloud.** For each valid pixel,
-`Z = f·b/d`, then `X = (u-cx)·Z/f`, `Y = (v-cy)·Z/f`. Result: a per-pixel
-`(X, Y, Z)` in the rectified-left camera frame, which we can transform into
-the rover-site frame using the per-image extrinsics.
+<p align="center">
+  <img src="media/disparity-sol755.png" alt="Turbo-colormapped disparity map of sol 755, showing dense returns on foreground rocks and progressively dimmer values on the far hillside">
+  <br>
+  <sub><i>Sol 755 disparity (turbo colormap, brighter = closer). Foreground boulders return ~30–50 px disparity (close range, well-textured). The far hillside drops to single-digit disparity. The dark band in the middle is the sand patch — low texture, SGBM rejects it.</i></sub>
+</p>
+
+**Step 6.5 — Back-project to a 3D point cloud.** For each valid pixel, recover
+the camera-frame point from the rectified intrinsics and the disparity:
+
+$$\begin{aligned}
+  Z &= \frac{f\,b}{d} \\
+  X &= \frac{(u - c_x)\, Z}{f} \\
+  Y &= \frac{(v - c_y)\, Z}{f}
+\end{aligned}$$
+
+Result: a per-pixel $(X, Y, Z)$ in the rectified-left camera frame, which we
+can transform into the rover-site frame using the per-image extrinsics.
 
 **Step 6.6 — Fit the local ground plane.** Now the interesting decision:
 **how do you measure the height of a rock without knowing where the ground
@@ -609,16 +664,18 @@ geometric reading.
 
 ### 10.2 Architecture
 
-```
-DINOv2 mask feature (1024-d, frozen)
-    │
-    ▼
-Linear(1024, 256) → ReLU → Dropout(0.1)
-Linear(256,  256) → ReLU → Dropout(0.1)
-Linear(256,    1)
-    │
-    ▼
-log-height (m)  →  exp() → metric height
+```mermaid
+flowchart LR
+    A[DINOv2 mask feature<br/>1024-d, frozen]:::frozen --> B[Linear 1024→256]
+    B --> C[ReLU + Dropout 0.1]
+    C --> D[Linear 256→256]
+    D --> E[ReLU + Dropout 0.1]
+    E --> F[Linear 256→1]
+    F --> G[log-height m]
+    G --> H["exp()"]
+    H --> I[metric height m]:::output
+    classDef frozen fill:#e0e7ff,stroke:#312e81,color:#000
+    classDef output fill:#dcfce7,stroke:#14532d,color:#000
 ```
 
 Three layers, ~330 K parameters. Small enough to train in minutes; big enough
@@ -626,23 +683,29 @@ to capture the "DINOv2 feature → height" relationship.
 
 We predict **log-height** because:
 
-- Heights span 0.08 m (just under threshold) to ~2 m (boulder). A linear target
-  gives an order-of-magnitude dynamic range; log-space flattens it.
+- Heights span $0.08\,\mathrm{m}$ (just under threshold) to $\sim 2\,\mathrm{m}$
+  (boulder). A linear target gives an order-of-magnitude dynamic range;
+  log-space flattens it.
 - Errors in log-space correspond to *relative* errors in metric space, which
   is what we care about (a 5 cm error on a 10 cm rock is much worse than a
   5 cm error on a 1 m rock).
 
 ### 10.3 Loss
 
-**Smooth L1** (Huber) on log-height. Why Huber instead of MSE:
+**Smooth L1** (Huber) on log-height:
 
-- Pseudolabels are noisy. Even after filtering there will be a few outliers
-  where stereo measured 80 cm but the rock was actually 30 cm (a tall ground
-  patch, a misregistered 3D point).
-- MSE punishes outliers quadratically and would let those few bad labels
-  dominate gradient updates.
-- Huber is quadratic for small errors (good gradients near optimum) but
-  linear for large errors (robust to outliers). Best of both.
+$$\mathcal{L}_{\delta}(\hat{y}, y) = \begin{cases}
+  \tfrac{1}{2}(\hat{y} - y)^{2} & \text{if } |\hat{y} - y| \leq \delta \\
+  \delta\,|\hat{y} - y| - \tfrac{1}{2}\delta^{2} & \text{otherwise}
+\end{cases}$$
+
+> [!TIP]
+> **Why Huber, not MSE?** Pseudolabels are noisy — a few outliers slip through
+> filtering (tall ground patches misread as rocks, misregistered 3D points
+> giving 80 cm instead of 30 cm). MSE punishes outliers *quadratically* and
+> lets those few bad labels dominate gradients. Huber is quadratic for small
+> errors (clean gradients near optimum) and linear for large errors (robust
+> to outliers). Best of both worlds.
 
 ### 10.4 Training data
 
@@ -679,17 +742,28 @@ How do we merge them?
 The simplest correct rule: **stereo wins when its measurements are
 trustworthy; mono fills in past that.**
 
-Concrete algorithm (`pipeline/fuse.py`):
-
-1. Keep every stereo detection with range ≤ `stereo_trust_range_m` (default
-   20 m).
-2. For every mono detection:
-   - If its range > 20 m → keep (mono regime).
-   - If its range ≤ 20 m → keep *only if* it doesn't IoU-overlap (>0.3) with a
-     kept stereo detection. This avoids double-counting the same rock.
-3. After merging, any detection that overlaps another from a different source
-   is re-tagged as `source="fused"` with the max height/confidence of the
-   overlap set.
+```mermaid
+flowchart TD
+    S[stereo detections]:::stereo --> A{range <= 20 m?}
+    M[mono detections]:::mono --> B{range > 20 m?}
+    A -- yes --> K1[keep verbatim]
+    A -- no --> X1[discard - stereo untrustworthy]
+    B -- yes --> K2[keep verbatim]
+    B -- no --> C{IoU > 0.3<br/>with kept stereo?}
+    C -- yes --> X2[discard - duplicate]
+    C -- no --> K3[keep verbatim]
+    K1 --> F[merged list]
+    K2 --> F
+    K3 --> F
+    F --> R{has overlap from<br/>both branches?}
+    R -- yes --> T1[retag as fused<br/>max heights/confidence]:::fused
+    R -- no --> T2[keep original tag]
+    T1 --> O[final detections]
+    T2 --> O
+    classDef stereo fill:#bbf7d0,stroke:#14532d,color:#000
+    classDef mono fill:#fed7aa,stroke:#7c2d12,color:#000
+    classDef fused fill:#fef3c7,stroke:#713f12,color:#000
+```
 
 This gives us three confidence tiers, encoded in the `source` field:
 
@@ -698,8 +772,20 @@ This gives us three confidence tiers, encoded in the `source` field:
 - `mono`: long-range, learned. Trust depends on training quality.
 
 The 20 m threshold isn't sacred — it can be tuned via config. We picked it
-because the `Z²` analysis (§4) shows stereo error crosses the rock height at
-roughly that range.
+because the $Z^{2}$ analysis (§4) shows stereo error crosses the rock height
+at roughly that range.
+
+A future upgrade (see `docs/ROADMAP.md` T1.2) is to replace the categorical
+"stereo wins" rule with **inverse-variance fusion** that uses each branch's
+$\sigma$:
+
+$$\frac{1}{\sigma_{\mathrm{fused}}^{2}} = \sum_{i} \frac{1}{\sigma_{i}^{2}},
+  \qquad
+  h_{\mathrm{fused}} = \sigma_{\mathrm{fused}}^{2} \sum_{i} \frac{h_{i}}{\sigma_{i}^{2}}.$$
+
+That handles the marginal-overlap range cleanly: a confident stereo $\sigma=2\,\mathrm{cm}$
+gets weighted ~225× more than a noisy mono $\sigma=30\,\mathrm{cm}$ for the
+same point, instead of the current binary winner-take-all.
 
 ---
 
@@ -747,21 +833,22 @@ are enough to describe a perfect pinhole camera. The last three vectors plus
 three scalars (O, R, E, linearity, mtype, mparam) are the **distortion
 extension** that makes CAHVORE different from a textbook camera.
 
+Visually, the four most important vectors look like this in the rover frame:
+
+<p align="center">
+  <img src="media/cahvore-vectors.png" alt="3D plot of CAHVORE C, A, H', V', O vectors for sol 100 left Navcam">
+  <br>
+  <sub><i>The four "geometric" CAHVORE vectors for the sol-100 left Navcam, plotted in the rover frame. <b>C</b> is the optical centre (~2 m above the deck). <b>A</b> is the boresight; <b>O</b> is the distortion symmetry axis (nearly identical to <b>A</b> for this lens, hence overlapping). <b>H'</b> and <b>V'</b> are the unit horizontal/vertical image axes derived from H, V, A.</i></sub>
+</p>
+
 Running `parse_component_list()` and then `principal_point()` / `focal_lengths()`
 on the values above gives the equivalent pinhole intrinsics:
 
-```
-fx = 739.66 px,  fy = 739.49 px
-cx = 648.57,     cy = 125.31
+$$f_x = 739.66\,\mathrm{px},\quad f_y = 739.49\,\mathrm{px},\quad c_x = 648.57,\quad c_y = 125.31$$
 
-       ┌                          ┐
-K  =   │ 739.66    0.00   648.57 │
-       │   0.00  739.49   125.31 │
-       │   0.00    0.00     1.00 │
-       └                          ┘
-```
+$$K = \begin{pmatrix} 739.66 & 0 & 648.57 \\ 0 & 739.49 & 125.31 \\ 0 & 0 & 1 \end{pmatrix}$$
 
-(The cy is small here — 125.31 — because this particular product is a
+(The $c_y$ is small here — 125.31 — because this particular product is a
 1280×240 horizon-only panorama strip, not the full 1280×960 frame.)
 
 ### 12.2 What "pinhole" means and why CV assumes it
@@ -770,24 +857,22 @@ A pinhole camera is the simplest possible projection: every 3D point shoots
 a straight ray through one infinitely small hole and lands on a flat image
 plane. The math is **linear**:
 
-```
-            ┌ fx   0   cx ┐
-u ≈ K · X,  │  0  fy   cy │
-            └  0   0    1 ┘
-```
+$$\mathbf{u} \approx K\,\mathbf{X},\qquad
+  K = \begin{pmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{pmatrix}.$$
 
-Three numbers (fx, fy, principal point cx/cy), plus a 3D rigid pose, and
-you're done. Every line in the world maps to a line in the image. Every
-coplanar object maps to a planar projection. **It's linear.** That's why
-it's so popular.
+Three numbers ($f_x, f_y$, principal point $c_x, c_y$), plus a 3D rigid
+pose, and you're done. Every line in the world maps to a line in the image.
+Every coplanar object maps to a planar projection. **It's linear.** That's
+why it's so popular.
 
 Crucially: **every standard CV library assumes pinhole intrinsics under the
 hood.** OpenCV's `stereoRectify`, `findEssentialMat`, `solvePnP`,
 `reprojectImageTo3D`; RAFT-Stereo; UniDepthV2's intrinsics input; SAM2's
-internal coordinates. Each of them takes a 3×3 K matrix. None of them takes
-a polynomial distortion model. If you feed them an undistorted image and a
-pinhole K, they work; if you feed them a distorted image, they silently
-produce wrong answers because they assume straight world lines stay straight.
+internal coordinates. Each of them takes a 3×3 $K$ matrix. None of them
+takes a polynomial distortion model. If you feed them an undistorted image
+and a pinhole $K$, they work; if you feed them a distorted image, they
+silently produce wrong answers because they assume straight world lines
+stay straight.
 
 ### 12.3 Why Navcam isn't pinhole
 
@@ -801,18 +886,21 @@ The cleanest way to see what this means in our actual data: project a known
 again through the **full CAHVORE** (with distortion), and look at the pixel
 disagreement. Run on the real sol-100 left Navcam:
 
-```
-Test setup:
-  - 7×5 grid of pixels uniformly across the 1280×240 frame.
-  - Each pixel unprojected through the linear core to a unit ray.
-  - A 3D point placed 5 m along that ray.
-  - Re-project that point back two ways: linear-CAHV vs full-CAHVORE.
+<p align="center">
+  <img src="media/cahvore-distortion-heatmap.png" alt="Two-panel figure: sol 100 left Navcam with reference grid above, log-scale heatmap of distortion magnitude below">
+  <br>
+  <sub><i>Top: sol-100 panorama strip with a sparse reference grid. Bottom: log-scale heatmap of $|\mathrm{project}_{\mathrm{CAHV}} - \mathrm{project}_{\mathrm{CAHVORE}}|$ for a 3D point at 5 m along each pixel's unprojected ray. Distortion is sub-pixel at the centre, ~90 px on average, and ~220 px at the corners.</i></sub>
+</p>
 
-Pixel disagreement |uv_linear − uv_full|:
-  near image centre :   0.37 px
-  mean across grid  :  90.92 px
-  max at corners    : 221.05 px
-```
+Numerically, on a 7×5 grid of pixels uniformly sampled across the 1280×240
+frame, with each pixel unprojected through the linear core to a unit ray
+and a 3D point placed 5 m along that ray, then re-projected two ways:
+
+| Region | $|uv_{\mathrm{linear}} - uv_{\mathrm{full}}|$ |
+|---|---|
+| near image centre | $0.37$ px |
+| mean across grid | $90.92$ px |
+| max at corners | $221.05$ px |
 
 Read that carefully:
 
@@ -858,6 +946,11 @@ errors in normal frames are catastrophic for stereo. Here's the chain:
 So: **we can't pretend Navcam is pinhole.** The whole near-field branch and
 the K-conditioned UniDepthV2 call would silently produce wrong answers,
 worst at exactly the locations (image edges, far field) we care about most.
+
+> [!WARNING]
+> Treating Navcam as pinhole **silently** breaks stereo at the corners. The
+> failure mode is wrong heights, not crashed code — exactly the worst kind
+> of bug. Always linearize first.
 
 ### 12.5 What we do — linearization
 
@@ -928,6 +1021,11 @@ same `cahvore.py` would handle them.
 ---
 
 ## 13. Testability: mocks behind Protocols
+
+> [!NOTE]
+> Mocks behind Protocols let CPU-only CI exercise the **entire** pipeline —
+> not just unit-level smoke. This catches contract breaks (shape, dtype,
+> field rename) without ever loading a model weight.
 
 A pipeline that requires CUDA + 5 GB of model weights to run a single test is
 a pipeline that nobody runs. We deliberately structured the code so that the
@@ -1008,8 +1106,11 @@ images written into `RectifiedPair`.
 
 **Step 4 — Disparity.** SGBM produces a disparity map. ~85% of pixels valid;
 the rest are NaN (sky, occlusions, low texture). Median disparity ≈ 14 px,
-which corresponds to depth ≈ `576 × 0.424 / 14 ≈ 17.4 m` — typical for
-Navcam terrain ahead of the rover.
+which corresponds to depth
+
+$$Z = \frac{576 \cdot 0.424}{14} \approx 17.4\,\mathrm{m}$$
+
+— typical for Navcam terrain ahead of the rover.
 
 **Step 5 — Point cloud.** Per-pixel back-projection. ~1 M points. After
 filtering for `Z < 200 m` and `valid mask`, ~880 K usable points.
@@ -1059,6 +1160,16 @@ mono detections, e.g.:
 **Step 11 — Output.** Write JSON: 13 entries with bbox, centroid, range, height,
 confidence, source. Write overlay PNG: green boxes for stereo, orange for
 mono, yellow for fused. Write turbo-colormapped disparity PNG.
+
+Here's the actual `overlay-sol755.jpg` produced by running the pipeline
+end-to-end on the sol-755 stereo pair from §6.1 (mock far-field backends, real
+stereo). Color-coded boxes per source:
+
+<p align="center">
+  <img src="media/overlay-sol755.jpg" alt="Sol 755 with detection boxes overlaid; green boxes for stereo, orange for mono, yellow for fused, with per-rock height + range labels">
+  <br>
+  <sub><i>Sol 755 detections: each box labelled with source, height (cm), and range (m). The pipeline produced this from one stereo pair in roughly 2 s on a 5090 (~700 ms SAM2, ~600 ms UniDepthV2 in the real configuration).</i></sub>
+</p>
 
 That's one pair. The whole thing runs in ~2 s on a 5090, dominated by SAM2
 (~700 ms) and UniDepthV2 (~600 ms).
