@@ -47,7 +47,11 @@ dev = [
     "types-PyYAML",
     "types-tqdm",
 ]
-all = ["rocksnitch[gpu,dev]"]
+ui = [
+    "gradio>=4.36",
+    "pandas>=2",
+]
+all = ["rocksnitch[gpu,dev,ui]"]
 
 [project.scripts]
 rock-snitch = "rocksnitch.cli:app"

@@ -49,6 +49,26 @@ def _root(
 
 
 @app.command()
+def fetch(
+    data_root: Path = typer.Argument(Path("data"), help="Output root for images/, metadata/, .state/"),
+    command: str = typer.Option("all", "--cmd", help="Phase to run: index | download | all"),
+    index_workers: int = typer.Option(1, "--index-workers"),
+    download_workers: int = typer.Option(8, "--download-workers"),
+) -> None:
+    """Download Mars 2020 Navcam L/R raw images and metadata from the public PDS feed."""
+    from rocksnitch.fetch import fetch as _fetch
+
+    if command not in {"index", "download", "all"}:
+        raise typer.BadParameter("--cmd must be index, download, or all")
+    _fetch(
+        data_root=data_root,
+        command=command,
+        index_workers=index_workers,
+        download_workers=download_workers,
+    )
+
+
+@app.command()
 def index(
     data_root: Path = typer.Argument(Path("data"), help="Root containing images/ and metadata/"),
     out: Path = typer.Option(Path("data/.state/stereo_index.parquet"), "--out", help="Output parquet path"),
@@ -320,6 +340,18 @@ def viz(
     ]
     write_overlay(rgb, dets, out)
     console.print(f"Wrote overlay to {out}")
+
+
+@app.command()
+def ui(
+    share: bool = typer.Option(False, "--share", help="Expose a public Gradio link"),
+    port: int = typer.Option(7860, "--port"),
+    host: str = typer.Option("127.0.0.1", "--host"),
+) -> None:
+    """Launch the Gradio web UI."""
+    from rocksnitch.app import build_app
+
+    build_app().launch(server_name=host, server_port=port, share=share)
 
 
 def main() -> None:  # pragma: no cover
