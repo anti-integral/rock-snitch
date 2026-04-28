@@ -67,21 +67,53 @@ TABLE_HEADERS = [
 # --------------------------------------------------------------------------- #
 
 # Module-level cache so the first click pays the construction cost once.
-# Keyed by (mock_models, use_gpu) so flipping the toggle doesn't poison state.
-_lazy_backends: dict[tuple[bool, bool], dict[str, Any]] = {}
+# Key includes every choice that changes which Python objects get built.
+_lazy_backends: dict[tuple, dict[str, Any]] = {}
 
 
-def _get_backends(*, mock_models: bool, use_gpu: bool = False) -> dict[str, Any]:
+def _build_profile_from_choices(
+    *,
+    base_profile_name: str,
+    enable_stereo: bool,
+    enable_mono: bool,
+    enable_linearize: bool,
+    segmenter_choice: str,
+    depth_choice: str,
+    features_choice: str,
+    stereo_choice: str,
+):
+    """Construct a ProfileSpec from a base preset + per-feature overrides."""
+    from rocksnitch.profiles import get_profile
+
+    p = get_profile(base_profile_name)
+    p.pipeline.enable_stereo = bool(enable_stereo)
+    p.pipeline.enable_mono = bool(enable_mono)
+    p.pipeline.enable_linearize = bool(enable_linearize)
+    p.segmenter = segmenter_choice  # type: ignore[assignment]
+    p.depth = depth_choice  # type: ignore[assignment]
+    p.features = features_choice  # type: ignore[assignment]
+    p.stereo = stereo_choice  # type: ignore[assignment]
+    return p
+
+
+def _get_backends(*, profile, device: str) -> dict[str, Any]:
     """Return cached perception backends, building them on first use."""
-    key = (bool(mock_models), bool(use_gpu))
+    key = (
+        device,
+        bool(profile.pipeline.enable_stereo),
+        bool(profile.pipeline.enable_mono),
+        bool(profile.pipeline.enable_linearize),
+        str(profile.segmenter),
+        str(profile.depth),
+        str(profile.features),
+        str(profile.stereo),
+    )
     if key not in _lazy_backends:
         from rocksnitch.cli import _build_backends
-        from rocksnitch.profiles import get_profile
 
-        log.info("Building backends (mock_models=%s, use_gpu=%s)", mock_models, use_gpu)
-        profile = get_profile("minimal" if mock_models else "full")
+        log.info("Building backends: %s on %s", profile.explain(), device)
         stereo, segmenter, depth, features = _build_backends(
-            config={}, profile=profile, use_gpu=use_gpu
+            config={}, profile=profile, device=device
         )
         _lazy_backends[key] = {
             "stereo": stereo,
@@ -201,6 +233,16 @@ def run_detection(
     min_height_cm: float,
     max_range_m: float,
     stereo_trust_range_m: float,
+    # Optional new toggles (default values preserve legacy behaviour)
+    base_profile_name: str = "full",
+    enable_stereo: bool = True,
+    enable_mono: bool = True,
+    enable_linearize: bool = False,
+    segmenter_choice: str = "sam2",
+    depth_choice: str = "unidepth",
+    features_choice: str = "dinov2",
+    stereo_choice: str = "sgbm",
+    device: str = "auto",
 ) -> tuple[
     np.ndarray | None,
     list[list[Any]],
@@ -210,7 +252,11 @@ def run_detection(
 ]:
     """Top-level Gradio click handler.
 
-    Returns: (overlay_rgb, table_rows, disparity_rgb, json_filepath, log_text)
+    Returns: (overlay_rgb, table_rows, disparity_rgb, json_filepath, log_text).
+
+    The first six positional parameters are the legacy interface kept for
+    backward compatibility with existing tests; the trailing keyword
+    parameters expose the full feature toggle surface to the UI.
     """
     buf = io.StringIO()
     handler = logging.StreamHandler(buf)
@@ -218,10 +264,25 @@ def run_detection(
     root = logging.getLogger()
     root.addHandler(handler)
     try:
+        # If mock_models is checked, the legacy semantics are "everything
+        # mocked" — equivalent to the minimal profile.
+        if mock_models:
+            base_profile_name = "minimal"
+            segmenter_choice = "mock"
+            depth_choice = "mock"
+            features_choice = "mock"
         return _run_detection_inner(
             left_image_path,
             json_file,
-            mock_models=mock_models,
+            base_profile_name=base_profile_name,
+            enable_stereo=bool(enable_stereo),
+            enable_mono=bool(enable_mono),
+            enable_linearize=bool(enable_linearize),
+            segmenter_choice=str(segmenter_choice),
+            depth_choice=str(depth_choice),
+            features_choice=str(features_choice),
+            stereo_choice=str(stereo_choice),
+            device=str(device),
             min_height_cm=float(min_height_cm),
             max_range_m=float(max_range_m),
             stereo_trust_range_m=float(stereo_trust_range_m),
@@ -238,7 +299,15 @@ def _run_detection_inner(
     left_image_path: str | None,
     json_file: str | None,
     *,
-    mock_models: bool,
+    base_profile_name: str,
+    enable_stereo: bool,
+    enable_mono: bool,
+    enable_linearize: bool,
+    segmenter_choice: str,
+    depth_choice: str,
+    features_choice: str,
+    stereo_choice: str,
+    device: str,
     min_height_cm: float,
     max_range_m: float,
     stereo_trust_range_m: float,
@@ -284,24 +353,29 @@ def _run_detection_inner(
 
     pair = _find_stereo_partner(json_payload, json_path)
 
-    backends = _get_backends(mock_models=mock_models, use_gpu=False)
+    from rocksnitch.device import detect_device
 
-    from rocksnitch.pipeline.far_field import FarFieldConfig
-    from rocksnitch.pipeline.fuse import FusionConfig
-    from rocksnitch.pipeline.near_field import NearFieldConfig
-    from rocksnitch.pipeline.run import PipelineConfig
-
-    cfg = PipelineConfig(
-        near=NearFieldConfig(
-            min_height_m=min_height_cm / 100.0,
-            max_range_m=max_range_m,
-        ),
-        far=FarFieldConfig(
-            min_height_m=min_height_cm / 100.0,
-            max_range_m=max_range_m,
-        ),
-        fusion=FusionConfig(stereo_trust_range_m=stereo_trust_range_m),
+    resolved_device = detect_device(prefer=None if device == "auto" else device)
+    profile = _build_profile_from_choices(
+        base_profile_name=base_profile_name,
+        enable_stereo=enable_stereo,
+        enable_mono=enable_mono,
+        enable_linearize=enable_linearize,
+        segmenter_choice=segmenter_choice,
+        depth_choice=depth_choice,
+        features_choice=features_choice,
+        stereo_choice=stereo_choice,
     )
+
+    # Apply UI threshold sliders to the per-stage configs
+    profile.pipeline.near.min_height_m = min_height_cm / 100.0
+    profile.pipeline.near.max_range_m = max_range_m
+    profile.pipeline.far.min_height_m = min_height_cm / 100.0
+    profile.pipeline.far.max_range_m = max_range_m
+    profile.pipeline.fusion.stereo_trust_range_m = stereo_trust_range_m
+
+    backends = _get_backends(profile=profile, device=resolved_device)
+    cfg = profile.pipeline
 
     detections: list[RockDetection]
     disparity_rgb: np.ndarray | None = None
@@ -383,11 +457,27 @@ def _example_rows(limit: int = 5) -> list[list[str]]:
 # --------------------------------------------------------------------------- #
 
 
-def build_app() -> Any:
-    """Build and return the Gradio Blocks app. No server is launched."""
+def build_app(
+    default_device: str | None = None,
+    default_profile: str = "full",
+) -> Any:
+    """Build and return the Gradio Blocks app. No server is launched.
+
+    Parameters
+    ----------
+    default_device : optional, one of {"cuda", "mps", "cpu", None}.
+        The detected device label shown in the UI banner. ``None`` triggers
+        auto-detection at construction time.
+    default_profile : initial value of the profile dropdown.
+    """
     import gradio as gr
 
+    from rocksnitch.device import detect_device, device_label
+    from rocksnitch.profiles import list_profiles
+
     examples = _example_rows()
+    auto_device = default_device or detect_device()
+    auto_label = device_label(auto_device)
 
     with gr.Blocks(title=TITLE, theme=gr.themes.Soft()) as demo:
         gr.Markdown(
@@ -395,6 +485,10 @@ def build_app() -> Any:
             f"{TAGLINE}\n\n"
             f"[README]({README_URL}) — green = stereo, orange = mono, "
             "yellow = fused"
+        )
+        gr.Markdown(
+            f"**Device:** auto-detected `{auto_device}` ({auto_label}). "
+            "Override below if you want to force a specific backend."
         )
 
         with gr.Row():
@@ -438,9 +532,50 @@ def build_app() -> Any:
                         step=1.0,
                         label="stereo-trust range [m]",
                     )
+
+                with gr.Accordion("Profile + features (all on by default)", open=True):
+                    base_profile = gr.Dropdown(
+                        choices=list_profiles(),
+                        value=default_profile,
+                        label="Profile preset",
+                        info="Picks a sensible default; tweak the toggles below to customise.",
+                    )
+                    device_dd = gr.Dropdown(
+                        choices=["auto", "cuda", "mps", "cpu"],
+                        value="auto",
+                        label="Device",
+                        info=f"Auto-detected: {auto_device} ({auto_label}).",
+                    )
+                    with gr.Row():
+                        stereo_cb = gr.Checkbox(value=True, label="Stereo branch")
+                        mono_cb = gr.Checkbox(value=True, label="Mono branch")
+                        linearize_cb = gr.Checkbox(
+                            value=False,
+                            label="CAHVORE linearize",
+                            info="Fix corner distortion. Adds ~50 ms/frame.",
+                        )
+                    seg_dd = gr.Dropdown(
+                        choices=["sam2", "mock"], value="sam2", label="Segmenter"
+                    )
+                    depth_dd = gr.Dropdown(
+                        choices=["unidepth", "mock", "none"],
+                        value="unidepth",
+                        label="Mono depth backend",
+                    )
+                    feat_dd = gr.Dropdown(
+                        choices=["dinov2", "mock", "none"],
+                        value="dinov2",
+                        label="Features",
+                    )
+                    stereo_dd = gr.Dropdown(
+                        choices=["sgbm", "raft", "none"],
+                        value="sgbm",
+                        label="Stereo backend",
+                    )
                     mock_toggle = gr.Checkbox(
-                        value=True,
-                        label="Use mock models (CPU, no weights)",
+                        value=False,
+                        label="Quick-mock everything (CPU, no weights)",
+                        info="Overrides all backend choices for fast local smoke testing.",
                     )
 
                 run_btn = gr.Button("Detect rocks", variant="primary")
@@ -480,6 +615,15 @@ def build_app() -> Any:
                 min_height_cm,
                 max_range_m,
                 stereo_trust_range_m,
+                base_profile,
+                stereo_cb,
+                mono_cb,
+                linearize_cb,
+                seg_dd,
+                depth_dd,
+                feat_dd,
+                stereo_dd,
+                device_dd,
             ],
             outputs=[overlay_out, table_out, disparity_out, json_out, log_out],
         )
@@ -500,12 +644,27 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=7860)
     p.add_argument("--share", action="store_true")
+    p.add_argument(
+        "--device",
+        default="auto",
+        choices=("auto", "cuda", "mps", "cpu"),
+        help="Device for backends. 'auto' picks cuda > mps > cpu.",
+    )
+    p.add_argument(
+        "--profile",
+        default="full",
+        help="Initial profile: full | stereo-only | mono-only | minimal | mock",
+    )
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_arg_parser().parse_args(argv)
-    demo = build_app()
+    from rocksnitch.device import detect_device, device_label
+
+    resolved = detect_device(prefer=None if args.device == "auto" else args.device)
+    log.info("UI launching on device: %s (%s)", resolved, device_label(resolved))
+    demo = build_app(default_device=resolved, default_profile=args.profile)
     demo.launch(
         server_name=args.host,
         server_port=args.port,

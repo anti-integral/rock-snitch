@@ -89,15 +89,18 @@ def index(
     console.print(f"Wrote index to [bold]{out}[/bold]")
 
 
-def _build_backends(config: dict, *, profile, use_gpu: bool):
-    """Instantiate backends per ``profile`` choices.
+def _build_backends(config: dict, *, profile, device: str = "cpu"):
+    """Instantiate backends per ``profile`` choices on ``device``.
 
     Returns (stereo, segmenter, depth, features). Any of these can be ``None``
-    if the profile disables that branch.
+    if the profile disables that branch. ``device`` is one of "cuda" / "mps" /
+    "cpu" — when "cpu", real GPU backends are silently downgraded to mocks
+    since they would fail to construct without a GPU runtime.
     """
     from rocksnitch.profiles import ProfileSpec
 
     p: ProfileSpec = profile
+    use_gpu = device in {"cuda", "mps"}
 
     # Stereo matcher
     stereo = None
@@ -108,7 +111,7 @@ def _build_backends(config: dict, *, profile, use_gpu: bool):
             ckpt = Path("models") / config.get("stereo", {}).get(
                 "raft", {}
             ).get("checkpoint", "raftstereo-middlebury.pth")
-            stereo = RaftStereoMatcher(ckpt, device="cuda")
+            stereo = RaftStereoMatcher(ckpt, device=device)
         else:
             from rocksnitch.geometry.disparity import SGBMMatcher
 
@@ -130,7 +133,7 @@ def _build_backends(config: dict, *, profile, use_gpu: bool):
             config_name=config.get("segmenter", {})
             .get("sam2", {})
             .get("config", "sam2_hiera_l"),
-            device="cuda",
+            device=device,
         )
         segmenter = SAM2Segmenter(sam_cfg)
 
@@ -144,7 +147,7 @@ def _build_backends(config: dict, *, profile, use_gpu: bool):
         else:
             from rocksnitch.perception.mono_depth import UniDepthConfig, UniDepthV2
 
-            depth = UniDepthV2(UniDepthConfig(device="cuda"))
+            depth = UniDepthV2(UniDepthConfig(device=device))
 
     # Feature extractor
     features = None
@@ -159,7 +162,7 @@ def _build_backends(config: dict, *, profile, use_gpu: bool):
                 DINOv2FeatureExtractor,
             )
 
-            features = DINOv2FeatureExtractor(DINOv2Config(device="cuda"))
+            features = DINOv2FeatureExtractor(DINOv2Config(device=device))
 
     return stereo, segmenter, depth, features
 
@@ -178,7 +181,9 @@ def detect(
         "--profile",
         help="Preset bundle: full | stereo-only | mono-only | minimal | mock",
     ),
-    use_gpu: bool = typer.Option(True, "--use-gpu/--no-gpu"),
+    device: str = typer.Option(
+        "auto", "--device", help="cuda | mps | cpu | auto (auto-detect, default)"
+    ),
     no_overlay: bool = typer.Option(False, "--no-overlay"),
     # Branch toggles (override profile)
     enable_stereo: Optional[bool] = typer.Option(
@@ -252,9 +257,13 @@ def detect(
         profile.stereo = stereo_choice  # type: ignore[assignment]
 
     config = _load_config(config_path)
+    from rocksnitch.device import detect_device, device_label
+
+    resolved_device = detect_device(prefer=None if device == "auto" else device)
+    log.info("device: %s (%s)", resolved_device, device_label(resolved_device))
     log.info(profile.explain())
     stereo, segmenter, depth, features = _build_backends(
-        config, profile=profile, use_gpu=use_gpu
+        config, profile=profile, device=resolved_device
     )
 
     output.mkdir(parents=True, exist_ok=True)
@@ -304,10 +313,11 @@ def pseudolabel(
     index_path: Path = typer.Option(Path("data/.state/stereo_index.parquet"), "--index"),
     config_path: Optional[Path] = typer.Option(None, "--config"),
     profile_name: str = typer.Option("stereo-only", "--profile"),
-    use_gpu: bool = typer.Option(True, "--use-gpu/--no-gpu"),
+    device: str = typer.Option("auto", "--device", help="cuda | mps | cpu | auto"),
     limit: int = typer.Option(0, "--limit", help="Cap number of pairs (0 = all)"),
 ) -> None:
     """Generate stereo-derived pseudolabels."""
+    from rocksnitch.device import detect_device
     from rocksnitch.profiles import get_profile, list_profiles
     from rocksnitch.training.pseudolabel import (
         PseudolabelConfig,
@@ -318,13 +328,15 @@ def pseudolabel(
     if profile_name not in list_profiles():
         raise typer.BadParameter(f"--profile must be one of {list_profiles()}")
     profile = get_profile(profile_name)
+    resolved_device = detect_device(prefer=None if device == "auto" else device)
+    use_gpu = resolved_device in {"cuda", "mps"}
     # Pseudolabeling needs DINOv2 features for the head's training set
     if profile.features == "none":
         profile.features = "dinov2" if use_gpu else "mock"
 
     config = _load_config(config_path)
     stereo, segmenter, _depth, features = _build_backends(
-        config, profile=profile, use_gpu=use_gpu
+        config, profile=profile, device=resolved_device
     )
     if not index_path.exists():
         raise typer.BadParameter(f"Index not found at {index_path}. Run `rock-snitch index` first.")
@@ -471,11 +483,22 @@ def ui(
     share: bool = typer.Option(False, "--share", help="Expose a public Gradio link"),
     port: int = typer.Option(7860, "--port"),
     host: str = typer.Option("127.0.0.1", "--host"),
+    device: str = typer.Option(
+        "auto", "--device", help="cuda | mps | cpu | auto (auto-detect)"
+    ),
+    profile_name: str = typer.Option(
+        "full", "--profile", help="Initial profile shown in the UI"
+    ),
 ) -> None:
     """Launch the Gradio web UI."""
     from rocksnitch.app import build_app
+    from rocksnitch.device import detect_device, device_label
 
-    build_app().launch(server_name=host, server_port=port, share=share)
+    resolved_device = detect_device(prefer=None if device == "auto" else device)
+    log.info("UI launching on device: %s (%s)", resolved_device, device_label(resolved_device))
+    build_app(default_device=resolved_device, default_profile=profile_name).launch(
+        server_name=host, server_port=port, share=share
+    )
 
 
 @app.command()
